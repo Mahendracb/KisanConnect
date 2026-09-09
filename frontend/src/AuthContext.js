@@ -32,13 +32,20 @@ export const AuthProvider = ({ children }) => {
     localStorage.setItem('token', newToken);
   };
 
-  const register = async (username, password, extraData = {}) => {
-    const res = await axios.post('http://localhost:5000/api/auth/register', { username, password, ...extraData });
+  const register = async (usernameOrData, password, extraData = {}) => {
+    let payload = {};
+    if (typeof usernameOrData === 'object') {
+      payload = usernameOrData;
+    } else {
+      payload = { username: usernameOrData, password, ...extraData };
+    }
+    const res = await axios.post('http://localhost:5000/api/auth/register', payload);
     const { token: newToken, ...userData } = res.data;
     axios.defaults.headers.common['Authorization'] = `Bearer ${newToken}`;
     setToken(newToken);
     setUser(userData);
     localStorage.setItem('token', newToken);
+    return userData;
   };
 
   const logout = () => {
