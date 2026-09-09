@@ -45,7 +45,8 @@ useEffect(() => {
   if (!listening && transcript.trim() !== "") {
     submitAIQuery(transcript);
   }
-}, [listening, transcript]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [listening, transcript]);
 
 const startListening = () => {
   resetTranscript();
