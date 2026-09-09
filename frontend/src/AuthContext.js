@@ -9,28 +9,32 @@ export const AuthProvider = ({ children }) => {
 
   useEffect(() => {
     if (token) {
-      axios.get('http://localhost:5000/api/auth/me', {
-        headers: { Authorization: `Bearer ${token}` }
-      })
-      .then(res => setUser(res.data))
-      .catch(err => {
-        console.error("Invalid token", err);
-        logout();
-      });
+      axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+      axios.get('http://localhost:5000/api/auth/me')
+        .then(res => setUser(res.data))
+        .catch(err => {
+          console.error("Invalid token session:", err);
+          logout();
+        });
+    } else {
+      delete axios.defaults.headers.common['Authorization'];
+      setUser(null);
     }
   }, [token]);
 
   const login = async (username, password) => {
     const res = await axios.post('http://localhost:5000/api/auth/login', { username, password });
     const { token: newToken, ...userData } = res.data;
+    axios.defaults.headers.common['Authorization'] = `Bearer ${newToken}`;
     setToken(newToken);
     setUser(userData);
     localStorage.setItem('token', newToken);
   };
 
-  const register = async (username, password) => {
-    const res = await axios.post('http://localhost:5000/api/auth/register', { username, password });
+  const register = async (username, password, extraData = {}) => {
+    const res = await axios.post('http://localhost:5000/api/auth/register', { username, password, ...extraData });
     const { token: newToken, ...userData } = res.data;
+    axios.defaults.headers.common['Authorization'] = `Bearer ${newToken}`;
     setToken(newToken);
     setUser(userData);
     localStorage.setItem('token', newToken);
@@ -38,10 +42,9 @@ export const AuthProvider = ({ children }) => {
 
   const logout = () => {
     if (token) {
-      axios.post('http://localhost:5000/api/auth/logout', {}, {
-        headers: { Authorization: `Bearer ${token}` }
-      }).catch(console.error);
+      axios.post('http://localhost:5000/api/auth/logout').catch(() => {});
     }
+    delete axios.defaults.headers.common['Authorization'];
     setToken(null);
     setUser(null);
     localStorage.removeItem('token');

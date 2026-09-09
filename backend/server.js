@@ -3,6 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const connectDB = require('./config/db');
 const { initMandiCron } = require('./services/mandiCron');
+const { notFound, errorHandler } = require('./middleware/errorMiddleware');
 
 // Route imports
 const authRoutes = require('./routes/authRoutes');
@@ -41,7 +42,8 @@ app.get('/', (req, res) => {
   res.json({
     status: 'online',
     app: 'farmX MERN Platform',
-    version: '2.0.0',
+    version: '2.1.0',
+    architecture: 'MVC (Controllers & Protected Routes)',
     services: {
       aiAdvisor: 'active',
       weatherAdvisory: 'active',
@@ -51,11 +53,9 @@ app.get('/', (req, res) => {
   });
 });
 
-// Error handling fallback
-app.use((err, req, res, next) => {
-  console.error(`[Server Error]: ${err.stack}`);
-  res.status(500).json({ error: err.message || 'Internal Server Error' });
-});
+// 404 & Error Handling Middlewares
+app.use(notFound);
+app.use(errorHandler);
 
 const server = app.listen(PORT, () => {
   console.log(`[farmX MERN Server]: Running on http://localhost:${PORT}`);
