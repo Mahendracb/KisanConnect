@@ -12,16 +12,22 @@ import {
   FileText, 
   X, 
   Send, 
-  AlertCircle 
+  AlertCircle,
+  Trash2,
+  RefreshCw,
+  Package
 } from "lucide-react";
 import { useLanguage } from "../LanguageContext";
+import { useAuth } from "../AuthContext";
 
 function EMandi() {
   const { language } = useLanguage();
+  const { user } = useAuth();
   const isKannada = language === "kn";
 
   const [activeTab, setActiveTab] = useState("marketplace"); // 'marketplace' | 'seller_portal'
   const [listings, setListings] = useState([]);
+  const [sellerListings, setSellerListings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -31,12 +37,12 @@ function EMandi() {
 
   // New Listing Form State (Seller)
   const [form, setForm] = useState({
-    sellerName: "Mahendra Gowda",
-    sellerPhone: "9845012345",
-    sellerEmail: "mahendra@farmx.in",
-    village: "Gejjalagere",
-    district: "Mandya",
-    cropName: "Sugarcane",
+    sellerName: user ? `${user.first_name || ''} ${user.last_name || ''}`.trim() || user.username : "Mahendra Gowda",
+    sellerPhone: user?.phone || "9845012345",
+    sellerEmail: user?.email || "mahendra@farmx.in",
+    village: user?.village || "Gejjalagere",
+    district: user?.district || "Mandya",
+    cropName: user?.primaryCrop || "Sugarcane",
     variety: "Co-86032 High Sugar Grade",
     quantityQuintals: 100,
     basePricePerQuintal: 3200,
@@ -45,6 +51,21 @@ function EMandi() {
   });
   const [submitting, setSubmitting] = useState(false);
   const [successMsg, setSuccessMsg] = useState("");
+
+  // Update form defaults if user loads later
+  useEffect(() => {
+    if (user) {
+      setForm(prev => ({
+        ...prev,
+        sellerName: `${user.first_name || ''} ${user.last_name || ''}`.trim() || user.username,
+        sellerPhone: user.phone || prev.sellerPhone,
+        sellerEmail: user.email || prev.sellerEmail,
+        village: user.village || prev.village,
+        district: user.district || prev.district,
+        cropName: user.primaryCrop || prev.cropName
+      }));
+    }
+  }, [user]);
 
   // Bidding Modal State (Buyer)
   const [biddingModalListing, setBiddingModalListing] = useState(null);
@@ -73,9 +94,56 @@ function EMandi() {
     }
   };
 
+  const fetchSellerListings = async () => {
+    const phone = user?.phone || form.sellerPhone;
+    if (!phone) return;
+    try {
+      const res = await axios.get(`http://localhost:5000/api/emandi/seller/${phone}`);
+      setSellerListings(res.data);
+    } catch (err) {
+      console.warn("Error loading seller listings:", err);
+    }
+  };
+
   useEffect(() => {
     fetchListings();
-  }, []);
+    fetchSellerListings();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
+
+  // Open individual listing with real-time verification (calls GET /api/emandi/listings/:id)
+  const openListingDetails = async (item, mode) => {
+    const listingId = item.id || item._id;
+    try {
+      const res = await axios.get(`http://localhost:5000/api/emandi/listings/${listingId}`);
+      const freshListing = res.data;
+      if (mode === 'bid') {
+        setBiddingModalListing(freshListing);
+        setBidForm({
+          buyerName: user ? `${user.first_name || ''} ${user.last_name || ''}`.trim() || user.username : "",
+          buyerPhone: user?.phone || "",
+          offeredPrice: freshListing.basePricePerQuintal,
+          quantityQuintals: freshListing.quantityQuintals,
+          message: ""
+        });
+      } else {
+        setDispatchSlipListing(freshListing);
+      }
+    } catch (err) {
+      if (mode === 'bid') {
+        setBiddingModalListing(item);
+        setBidForm({
+          buyerName: user ? `${user.first_name || ''} ${user.last_name || ''}`.trim() || user.username : "",
+          buyerPhone: user?.phone || "",
+          offeredPrice: item.basePricePerQuintal,
+          quantityQuintals: item.quantityQuintals,
+          message: ""
+        });
+      } else {
+        setDispatchSlipListing(item);
+      }
+    }
+  };
 
   // Seller submits a new harvest listing
   const handleCreateListing = async (e) => {
@@ -86,6 +154,7 @@ function EMandi() {
       await axios.post("http://localhost:5000/api/emandi/listings", form);
       setSuccessMsg(isKannada ? "ನಿಮ್ಮ ಬೆಳೆ ಯಶಸ್ವಿಯಾಗಿ ನಮೂದಾಗಿದೆ!" : "Harvest listing posted successfully to e-Mandi!");
       fetchListings();
+      fetchSellerListings();
       setActiveTab("marketplace");
     } catch (err) {
       alert("Error creating listing: " + (err.response?.data?.error || err.message));
@@ -108,6 +177,7 @@ function EMandi() {
       setBiddingModalListing(null);
       setBidForm({ buyerName: "", buyerPhone: "", offeredPrice: "", quantityQuintals: "", message: "" });
       fetchListings();
+      fetchSellerListings();
     } catch (err) {
       alert("Error submitting offer: " + (err.response?.data?.error || err.message));
     } finally {
@@ -120,8 +190,34 @@ function EMandi() {
     try {
       await axios.patch(`http://localhost:5000/api/emandi/listings/${listingId}/offers/${offerId}`, { status });
       fetchListings();
+      fetchSellerListings();
     } catch (err) {
       alert("Error updating offer: " + (err.response?.data?.error || err.message));
+    }
+  };
+
+  // Seller updates listing availability status
+  const handleUpdateListingStatus = async (listingId, status) => {
+    try {
+      await axios.patch(`http://localhost:5000/api/emandi/listings/${listingId}/status`, { status });
+      fetchListings();
+      fetchSellerListings();
+    } catch (err) {
+      alert("Error updating listing status: " + (err.response?.data?.error || err.message));
+    }
+  };
+
+  // Seller deletes a listing
+  const handleDeleteListing = async (listingId) => {
+    if (!window.confirm(isKannada ? "ನೀವು ಖಚಿತವಾಗಿ ಈ ಬೆಳೆಯ ಪಟ್ಟಿಯನ್ನು ಅಳಿಸಲು ಬಯಸುವಿರಾ?" : "Are you sure you want to delete this harvest listing?")) {
+      return;
+    }
+    try {
+      await axios.delete(`http://localhost:5000/api/emandi/listings/${listingId}`);
+      fetchListings();
+      fetchSellerListings();
+    } catch (err) {
+      alert("Error deleting listing: " + (err.response?.data?.error || err.message));
     }
   };
 
@@ -310,16 +406,7 @@ function EMandi() {
                       {!isSold && (
                         <button
                           style={styles.bidBtn}
-                          onClick={() => {
-                            setBiddingModalListing(item);
-                            setBidForm({
-                              buyerName: "",
-                              buyerPhone: "",
-                              offeredPrice: item.basePricePerQuintal,
-                              quantityQuintals: item.quantityQuintals,
-                              message: ""
-                            });
-                          }}
+                          onClick={() => openListingDetails(item, 'bid')}
                         >
                           <DollarSign size={18} />
                           {isKannada ? "ಬಿಡ್ ಸಲ್ಲಿಸಿ" : "Make Offer"}
@@ -329,7 +416,7 @@ function EMandi() {
                       {/* View Dispatch Slip */}
                       <button
                         style={styles.slipBtn}
-                        onClick={() => setDispatchSlipListing(item)}
+                        onClick={() => openListingDetails(item, 'slip')}
                         title="View Mandi Transport Pass"
                       >
                         <FileText size={18} />
@@ -486,6 +573,108 @@ function EMandi() {
                 </button>
               </div>
             </form>
+          </div>
+
+          {/* MY HARVEST LISTINGS TABLE */}
+          <div style={styles.manageCard}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <h3 style={{ ...styles.manageTitle, margin: 0 }}>
+                <Package size={22} color="#16a34a" style={{ verticalAlign: "middle", marginRight: 8 }} />
+                {isKannada ? "ನನ್ನ ಸಕ್ರಿಯ ಬೆಳೆ ಪಟ್ಟಿಗಳು" : "My Harvest Listings (Active Inventory)"}
+              </h3>
+              <button
+                type="button"
+                onClick={() => { fetchListings(); fetchSellerListings(); }}
+                style={{ ...styles.slipBtn, display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                title="Refresh listings"
+              >
+                <RefreshCw size={14} />
+                <span>{isKannada ? "ನವೀಕರಿಸಿ" : "Refresh"}</span>
+              </button>
+            </div>
+
+            <div style={styles.tableResponsive}>
+              <table style={styles.table}>
+                <thead>
+                  <tr style={styles.thRow}>
+                    <th style={styles.th}>Crop & Variety</th>
+                    <th style={styles.th}>Quantity</th>
+                    <th style={styles.th}>Base Price</th>
+                    <th style={styles.th}>Harvest Date</th>
+                    <th style={styles.th}>Listing Status</th>
+                    <th style={styles.th}>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(sellerListings.length > 0 
+                    ? sellerListings 
+                    : listings.filter(l => l.sellerPhone === (user?.phone || form.sellerPhone) || (user && l.sellerId === user._id))
+                  ).length === 0 ? (
+                    <tr>
+                      <td colSpan="6" style={{ ...styles.td, textAlign: 'center', color: '#64748b', padding: '24px 0' }}>
+                        {isKannada ? "ನೀವು ಇನ್ನೂ ಯಾವುದೇ ಬೆಳೆಗಳನ್ನು ಪಟ್ಟಿ ಮಾಡಿಲ್ಲ." : "You have not published any harvest listings yet."}
+                      </td>
+                    </tr>
+                  ) : (
+                    (sellerListings.length > 0 
+                      ? sellerListings 
+                      : listings.filter(l => l.sellerPhone === (user?.phone || form.sellerPhone) || (user && l.sellerId === user._id))
+                    ).map((item) => {
+                      const listId = item.id || item._id;
+                      return (
+                        <tr key={listId} style={styles.tr}>
+                          <td style={styles.td}>
+                            <strong>{item.cropName}</strong>
+                            <div style={{ fontSize: '0.8rem', color: '#64748b' }}>{item.variety}</div>
+                          </td>
+                          <td style={styles.td}><strong>{item.quantityQuintals}</strong> Qtl</td>
+                          <td style={styles.td}><strong style={{ color: "#16a34a" }}>₹{item.basePricePerQuintal}</strong> /Qtl</td>
+                          <td style={styles.td}>{item.expectedHarvestDate}</td>
+                          <td style={styles.td}>
+                            <select
+                              value={item.status}
+                              onChange={(e) => handleUpdateListingStatus(listId, e.target.value)}
+                              style={{
+                                padding: "4px 8px",
+                                borderRadius: 8,
+                                fontSize: "0.82rem",
+                                fontWeight: 600,
+                                border: "1px solid #cbd5e1",
+                                backgroundColor: item.status === 'sold' ? '#dcfce7' : item.status === 'under_negotiation' ? '#fef3c7' : '#f0fdf4',
+                                color: item.status === 'sold' ? '#166534' : item.status === 'under_negotiation' ? '#92400e' : '#15803d',
+                                cursor: 'pointer'
+                              }}
+                            >
+                              <option value="available">Available (ಲಭ್ಯವಿದೆ)</option>
+                              <option value="under_negotiation">Under Negotiation (ಮಾತುಕತೆಯಲ್ಲಿದೆ)</option>
+                              <option value="sold">Sold (ಮಾರಾಟವಾಗಿದೆ)</option>
+                            </select>
+                          </td>
+                          <td style={styles.td}>
+                            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                              <button
+                                style={{ ...styles.slipBtn, padding: "6px 10px" }}
+                                onClick={() => openListingDetails(item, 'slip')}
+                                title="View Transport Gate Pass"
+                              >
+                                <FileText size={16} />
+                              </button>
+                              <button
+                                style={{ ...styles.rejectBtn, padding: "6px 10px", backgroundColor: "#fee2e2", color: "#b91c1c", border: "1px solid #fca5a5" }}
+                                onClick={() => handleDeleteListing(listId)}
+                                title={isKannada ? "ಪಟ್ಟಿಯನ್ನು ಅಳಿಸಿ" : "Delete Listing"}
+                              >
+                                <Trash2 size={16} />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
 
           {/* SELLER'S OFFERS MANAGEMENT TABLE */}
